@@ -1,0 +1,275 @@
+<?php
+
+function crazy_search_block_info() {
+  $blocks = array();
+  
+  $blocks['search_block'] = array(
+    'info' => t('crazy search'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+    
+  return $blocks;
+}
+
+function crazy_search_block_view($block_name = '') {
+  
+  if ($block_name == 'search_block') {
+    $block['content'] = drupal_get_form('search_block_form');
+    return $block;
+  }
+}
+
+function crazy_search_menu() {
+   
+    $items['crazysearch/autocomplete'] = array(
+      'title' => 'Crazy search',
+      'page callback' => '_crazy_search_autocomplete',
+      'access callback' => TRUE,
+      'type' => MENU_CALLBACK,
+    );
+
+    $items['admin/config/search/crazy_search'] = array(
+    'title' => 'Crazy search',
+    'description' => 'Configuration for crazy search module',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('crazy_search_form'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+    return $items;
+}
+
+function search_block_form($form, &$form_state) {
+  $form = array();
+
+    $form['search_block_form'] = array(
+    '#type' => 'textfield',
+    '#title_display' => 'invisible',
+    '#size' => 15,
+    '#default_value' => '',
+    '#autocomplete_path' => 'crazysearch/autocomplete',
+    '#placeholder' => 'Enter the words you wish to search for.'
+    );
+  
+  $form['actions'] = array('#type' => 'actions');
+  $form['actions']['submit'] = array('#type' => 'submit', '#value' => t('Search'), '#name' => 'crazy_search_submit');
+
+  $form['#submit'][] = 'search_block_form_submit';
+
+  return $form;
+}
+
+function crazy_search_form($form, &$form_state) {
+
+  if (!variable_get('crazy_search_nodetypes'))
+    variable_set('crazy_search_nodetypes', array('article' => 'Article'));
+
+  $form['crazy_search_max'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Maximum number of results'),
+    '#default_value' => variable_get('crazy_search_max', 3),
+    '#size' => 2,
+    '#maxlength' => 2,
+    '#description' => t('The maximum number of links to display for every node type.'),
+    '#required' => TRUE,
+  );
+
+    $query = db_query("SELECT `type`,`name` FROM `node_type`");
+    $type_options = array();
+
+    while ($row = $query->fetchAssoc()) {
+        $type_options[$row['type']] = $row['name'];
+    }
+
+    $form['crazy_search_nodetypes'] = array(
+      '#type' => 'checkboxes',
+      '#options' => $type_options,
+      '#title' => t('What is node types you want to search for?'),
+      '#default_value' => array('article'),
+      // '#attributes' => array('checked' => 'checked'),
+    );
+
+    $form['crazy_search_users'] = array(
+      '#type' => 'checkbox', 
+      '#title' => t('Search users'), 
+      '#return_value' => 1, 
+      '#default_value' => variable_get('crazy_search_users'),
+      '#description' => t("search with users and add founds to search results list"),
+    );
+
+    $form['crazy_search_images'] = array(
+      '#type' => 'checkbox', 
+      '#title' => t('Use image'), 
+      '#return_value' => 1, 
+      '#default_value' => variable_get('crazy_search_images'),
+      '#description' => t("if checked, node image(field_image) and user picture will add to search results list with its title"),
+    );
+
+    $use_image = variable_get("crazy_search_images");
+
+    if($use_image == 1)
+    {    
+      $form['crazy_search_imagestyle'] = array(
+            '#type' => 'radios',
+            '#options' => image_style_options(false),
+            '#title' => t('What is image style you want to use?'),
+            '#default_value' => variable_get('crazy_search_imagestyle','thumbnail'),
+          );
+    }
+
+  return system_settings_form($form);
+}
+
+function _crazy_search_autocomplete($string) {
+  $results = array();
+  $querystr = "";
+  
+   $limitnum = variable_get("crazy_search_max");
+
+  $nodetypes = variable_get("crazy_search_nodetypes");
+  $nodetypes = array_reverse($nodetypes);
+  
+  foreach ($nodetypes as $key => $value) {
+    if($value != '0')
+    {
+        if($querystr != "")
+          {
+            $querystr .= " UNION (select `nid`,`title`,`type` from `node` where `title` LIKE '".$string."%' AND `type` = '".$value."' ORDER BY `title` limit ".$limitnum.")";
+          }
+        else
+          $querystr .= "(select `nid`,`title`,`type` from `node` where `title` LIKE '".$string."%' AND `type` = '".$value."' ORDER BY `title` limit ".$limitnum.")";
+    }
+  }
+    
+  $search_user = variable_get("crazy_search_users");
+
+  if($search_user == '1')
+  {
+    $querystr .= " UNION
+       (SELECT `uid` AS `nid`,`name` AS `title`,'user' AS `type` FROM `users` WHERE `name` LIKE '".$string."%' ORDER BY `name` LIMIT ".$limitnum.")";
+  }
+  $query = db_query($querystr);
+
+    $type = 'type';
+   
+    
+    $typename = '';
+
+    while ($row = $query->fetchAssoc()) {
+      if($type != $row['type'])
+      {
+        $type = $row['type'];
+      }
+      
+      if($row['type'] == 'user')
+      {
+        $results[$row['type']] = '<div class="nodetype '.$row['type'].'">Users</div>';
+
+        $userentity = user_load($row['nid']);
+        $userimg = '';
+
+        if(variable_get("crazy_search_images") == 1)
+        { 
+          $img_url = image_style_url(variable_get("crazy_search_imagestyle"), $userentity->picture->uri);
+          $img_info = image_get_info($img_url);
+
+          $userimgArr = explode('/', $userentity->picture->uri);
+          $arrcount = count($userimgArr);
+          $userimg = url('sites/default/files/'.$userimgArr[$arrcount-2].'/'.$userimgArr[$arrcount-1]);
+
+           if($userentity->picture->uri != NULL)
+                $imgurl = $userentity->picture->uri;
+              else
+                $imgurl = 'default_images/user.png';
+
+            $userimg2 = theme_image_style(
+              array(
+                  'style_name' => variable_get("crazy_search_imagestyle"),
+                  'path' => $imgurl,
+                  '#id' => 'ImgUser',
+                  'attributes' => array(
+                      'class' => 'ImgUser'
+                  ),
+                  "height" => $img_info->height,
+                  "width" => $img_info->width,
+                )
+            );
+
+            $userimg = '<div class="image">'.$userimg2.'</div>';
+        }
+
+        $results[check_plain($row['title'])] = '<a href="'.url("user/".$row['nid']).'">'.$userimg.'<div class="title">'.check_plain($row['title']).'</div></a>';
+      }
+      else
+      {
+        $query2 = db_query("select `name` from `node_type` where `type` = '".$row['type']."'");
+        $typename = $query2->fetchField();
+
+        $node = node_load($row['nid']);
+
+        $results[$row['type']] = '<div class="nodetype '.$row['type'].'">'.$typename.'</div>';
+        $nodeimg = '';
+
+        if(variable_get("crazy_search_images") == 1)
+        { 
+          $img_url = image_style_url(variable_get("crazy_search_imagestyle"), $node->field_image['und']['0']['uri']);
+          $img_info = image_get_info($img_url);
+
+          $imgurl = $node->field_image['und']['0']['uri'];
+
+          $nodeimg2 = theme_image_style(
+              array(
+                  'style_name' => variable_get("crazy_search_imagestyle"),
+                  'path' => $imgurl,
+                  '#id' => 'ImgUser',
+                  'attributes' => array(
+                      'class' => 'ImgUser'
+                  ),
+                  "height" => $img_info->height,
+                  "width" => $img_info->width,
+              )
+          );
+
+          $nodeimg = '<div class="image">'.$nodeimg2.'</div>';
+
+        }
+          $results[check_plain($row['title'])] = '<a href="'.url("node/".$row['nid']).'">'.$nodeimg.'<div class="title">'.check_plain($row['title']).'</div></a>';
+      }
+      
+      $rowcount++;
+    }
+
+    if($rowcount == 0)
+    {
+      $results['result'] = '<div class="noresult">there is no result for <span>'.$string.'</span> search</div>';
+    }
+    else
+    {
+       $results[$string] = '<a class="viewmore ajax-link" href="'.url("search/node/".$string).'" rel="#content">View more</a>';
+    }
+
+    drupal_json_output($results);
+}
+
+function search_block_form_submit($form, &$form_state) {
+
+  if (isset($_GET['destination'])) {
+    unset($_GET['destination']);
+  }
+
+  if ($form_state['values']['search_block_form'] == '') {
+    form_set_error('keys', t('Please enter some keywords.'));
+  }
+
+  $form_id = $form['form_id']['#value'];
+  $info = search_get_default_module_info();
+  
+  if ($info) {
+    $form_state['redirect'] = 'search/' . $info['path'] . '/' . trim($form_state['values']['search_block_form']);
+  }
+  else {
+    form_set_error(NULL, t('Search is currently disabled.'), 'error');
+  }
+}
+

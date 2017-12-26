@@ -1,0 +1,29 @@
+<?php
+
+/**
+ * @file
+ * Creating content type 
+ */
+
+/**
+ * Implements hook_install().
+ */
+function crazy_search_install() {
+
+  // Drupal wall Custom variables.
+  // variable_set ('notes_offset', 0);
+  // variable_set ('offsetvalue', 7);
+
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function crazy_search_uninstall() {
+
+  // Remove persistant variables that control settings.	
+  // variable_del ('notes_offset');
+  // variable_del ('offsetvalue');
+
+}
+
